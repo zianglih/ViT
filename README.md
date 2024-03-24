@@ -1,4 +1,4 @@
-# VIT
+# ViT
 
 ## Resources
 - Vision Transformer from Scratch https://github.com/tintn/vision-transformer-from-scratch
