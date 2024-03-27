@@ -37,12 +37,20 @@ For the MAE followup, we will use checkpoints from the pretrained models, and fi
 
 ## Computational Resources
 
-Colab, 3060, 4050. We may rent H100 if needed.
+- Local
+  - RTX 3060, RTX 4050, etc
+- Cloud
+  - Colab
+  - AWS EC2
+  - Lambda Lab (H100 available)
 
-Ideally, the model should be able to converge on less than 2 hours of training on a RTX 4050 laptop GPU.
+Ideally, the model should be able to converge on less than 2 hours of training on a RTX 4050 laptop GPU. Note since we will first downscale the images to low resolution ones, my past experience is the tranining process is more latency bounded, which means processing single image does not require significant computational power. In this case, more powerful GPUs do not necessarily mean faster training due to lower resource utilization.
 
 ## Evaluation
-
-- ViT vs. CNN, accuracy on different data scale
-- Algorithm enhancement proposed by MAE and other following work
-- MAE transfer learning vs. ViT direct training, compare based on speed/accuracy/supervised/...
+- Metric
+  - ViT vs. CNN, accuracy on different data scale
+  - MAE transfer learning vs. ViT direct training, compare based on speed/accuracy/supervised/...
+- Analysis and improvements
+  - Why does our direct trained ViT perform better/worse than CNN?
+  - Are we able to implement any algorithmic enhancements to make it better than the baseline?
+    - e.g. inspirations from future works, MAE, BEiT, etc
