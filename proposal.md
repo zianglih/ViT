@@ -51,6 +51,7 @@ Ideally, the model should be able to converge on less than 2 hours of training o
   - ViT vs. CNN, accuracy on different data scale
   - MAE transfer learning vs. ViT direct training, compare based on speed/accuracy/supervised/...
 - Analysis and improvements
+  - Visualize and explain what our model has learned
   - Why does our direct trained ViT perform better/worse than CNN?
   - Are we able to implement any algorithmic enhancements to make it better than the baseline?
     - e.g. inspirations from future works, MAE, BEiT, etc
