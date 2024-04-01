@@ -6,8 +6,8 @@ python train.py
 ## Parameters:
 change parameters.json for self-defined structures
 ## Possible next steps:
-Change model structures for potential performance boosts
-Hyperparameter search for fine tunning
+Change model structures for potential performance boosts\
+Hyperparameter search for fine tunning\
 Data selections and preprocessing (currently from https://www.cs.toronto.edu/~kriz/cifar.html dataset)
 ## Resources
 - Vision Transformer from Scratch https://github.com/tintn/vision-transformer-from-scratch
