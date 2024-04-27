@@ -2,18 +2,6 @@ import torch.nn as nn
 import torch
 import math
 
-class NewGELUActivation(nn.Module):
-    """
-    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT). Also see
-    the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
-
-    Taken from https://github.com/huggingface/transformers/blob/main/src/transformers/activations.py
-    """
-
-    def forward(self, input):
-        return 0.5 * input * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0))))
-
-
 class PatchEmbeddings(nn.Module):
     """
     Convert the image into patches and then project them into a vector space.
@@ -155,7 +143,7 @@ class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense_1 = nn.Linear(config["hidden_size"], config["intermediate_size"])
-        self.activation = NewGELUActivation()
+        self.activation = nn.GELU()
         self.dense_2 = nn.Linear(config["intermediate_size"], config["hidden_size"])
         self.dropout = nn.Dropout(config["hidden_dropout_prob"])
 
@@ -222,6 +210,22 @@ class Encoder(nn.Module):
         else:
             return (x, all_attentions)
         
+class FinalLayer(nn.Module):
+
+
+    def __init__(self, config):
+        super().__init__()
+        self.last_layer_use_mlp = config["last_layer_use_mlp"]
+        self.hidden_size = config["hidden_size"]
+        self.num_classes = config["num_classes"]
+        if (self.last_layer_use_mlp):
+            self.classifier = MLP(config)
+        else:
+            self.classifier = nn.Linear(self.hidden_size, self.num_classes)
+            
+    def forward(self, x):
+        return self.classifier(x)
+        
 
 class ViTForClassfication(nn.Module):
     """
@@ -239,7 +243,7 @@ class ViTForClassfication(nn.Module):
         # Create the transformer encoder module
         self.encoder = Encoder(config)
         # Create a linear layer to project the encoder's output to the number of classes
-        self.classifier = nn.Linear(self.hidden_size, self.num_classes)
+        self.classifier = FinalLayer(config)
         # Initialize the weights
         self.apply(self._init_weights)
 

@@ -12,7 +12,7 @@
         "num_classes": 10, 
         "num_channels": 3,
         "qkv_bias": 1,
-        "use_faster_attention": 1
+        "last_layer_use_mlp": 0
     },
     "args" : {
         "exp_name": "vit_cifar10",
