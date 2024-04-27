@@ -1,6 +1,8 @@
 import torch.nn as nn
 import torch
 import math
+import torch.nn.functional as F
+
 
 class NewGELUActivation(nn.Module):
     """
@@ -100,7 +102,66 @@ class AttentionHead(nn.Module):
         attention_output = torch.matmul(attention_probs, value)
         return (attention_output, attention_probs)
     
+class LocalSelfAttention(nn.Module):
+    def __init__(self, dim, heads=8, dim_head=64, dropout=0.0):
+        super().__init__()
+        # Calculate the total dimension of all heads combined
+        inner_dim = dim_head * heads
+        self.heads = heads
+        
+        # Parameter for scaling the dot product in the attention mechanism
+        self.scale = nn.Parameter(torch.log(torch.tensor(dim_head ** -0.5)))
+        
+        # Normalization and dropout layers
+        self.norm = nn.LayerNorm(dim)
+        self.dropout = nn.Dropout(dropout)
+        
+        # Linear layers for projecting input to queries, keys, and values
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
+        
+        # Output projection layer
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, dim),
+            nn.Dropout(dropout)
+        )
 
+    def forward(self, x):
+        # Apply layer norm to the input
+        x = self.norm(x)
+        
+        # Generate queries, keys, and values
+        qkv = self.to_qkv(x).chunk(3, dim=-1)
+        q, k, v = [self._split_heads(t) for t in qkv]
+        print(f"Shape of q: {q.shape}")
+        print(f"Shape of k: {k.shape}")
+        print(f"Shape of v: {v.shape}")
+        # Compute the dot products for the queries and keys, scale by the temperature
+        dots = torch.matmul(q, k.transpose(-2, -1)) * self.scale.exp()
+        
+        # Apply masking to the diagonal of the attention matrix
+        mask = torch.eye(dots.shape[-1], device=dots.device).bool()
+        dots = dots.masked_fill(mask, float('-inf'))
+        
+        # Apply softmax to get the attention weights, then apply dropout
+        attn = F.softmax(dots, dim=-1)
+        attn = self.dropout(attn)
+        
+        # Multiply attention weights with the values and combine the heads
+        out = torch.matmul(attn, v)
+        out = self._combine_heads(out)
+        
+        # Apply the final linear transformation
+        return self.to_out(out)
+
+    def _split_heads(self, x):
+        """Split the last dimension into (heads, depth)"""
+        return x.reshape(x.shape[0], x.shape[1], self.heads, -1).transpose(1, 2)
+
+    def _combine_heads(self, x):
+        """Combine the heads to get the final dimension as inner_dim"""
+        x = x.transpose(1, 2).reshape(x.shape[0], x.shape[1], -1)
+        return x
+    
 class MultiHeadAttention(nn.Module):
     """
     Multi-head attention module.
@@ -126,6 +187,12 @@ class MultiHeadAttention(nn.Module):
                 self.qkv_bias
             )
             self.heads.append(head)
+            print(f"Attention head size: {self.attention_head_size}")
+            print(f"Hidden size: {self.hidden_size}")
+            print(f"Number of attention heads: {self.num_attention_heads}")
+            print(f"Number of all heads: {self.all_head_size}")
+            print(f"Number of heads: {len(self.heads)}")
+            self.heads.append(LocalSelfAttention(self.hidden_size, heads=self.num_attention_heads, dim_head=self.attention_head_size, dropout=config["attention_probs_dropout_prob"]))
         # Create a linear layer to project the attention output back to the hidden size
         # In most cases, all_head_size and hidden_size are the same
         self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
@@ -223,6 +290,10 @@ class Encoder(nn.Module):
             return (x, all_attentions)
         
 
+
+
+
+
 class ViTForClassfication(nn.Module):
     """
     The ViT model for classification.
@@ -242,6 +313,7 @@ class ViTForClassfication(nn.Module):
         self.classifier = nn.Linear(self.hidden_size, self.num_classes)
         # Initialize the weights
         self.apply(self._init_weights)
+        # Initialize the MLP head
 
     def forward(self, x, output_attentions=False):
         # Calculate the embedding output
