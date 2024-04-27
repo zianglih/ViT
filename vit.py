@@ -208,14 +208,24 @@ class Encoder(nn.Module):
         for _ in range(config["num_hidden_layers"]):
             block = Block(config)
             self.blocks.append(block)
+            
+        # Initialize the Patch Merger at middle layer
+        self.num_hidden_layers = config["num_hidden_layers"]
+        self.patch_merger_index = self.num_hidden_layers // 2
+        self.patch_merger = PatchMerger(dim=config["hidden_size"], num_tokens_out=8)
 
     def forward(self, x, output_attentions=False):
         # Calculate the transformer block's output for each block
         all_attentions = []
-        for block in self.blocks:
+        for i, block in enumerate(self.blocks):
             x, attention_probs = block(x, output_attentions=output_attentions)
             if output_attentions:
                 all_attentions.append(attention_probs)
+                
+            # Apply patch merger:
+            if i == self.patch_merger_index-1:
+                x = self.patch_merger(x)
+
         # Return the encoder's output and the attention probabilities (optional)
         if not output_attentions:
             return (x, None)
@@ -251,7 +261,7 @@ class ViTForClassfication(nn.Module):
         # Create the embedding module
         self.embedding = Embeddings(config)
         # Initialize PatchMerger
-        self.patch_merger = PatchMerger(dim=self.hidden_size, num_tokens_out=2)
+        self.patch_merger = PatchMerger(dim=self.hidden_size, num_tokens_out=8)
         # Create the transformer encoder module
         self.encoder = Encoder(config)
         # Create a linear layer to project the encoder's output to the number of classes
@@ -262,10 +272,8 @@ class ViTForClassfication(nn.Module):
     def forward(self, x, output_attentions=False):
         # Calculate the embedding output
         embedding_output = self.embedding(x)
-        # Merge patches if applicable
-        merged_output = self.patch_merger(embedding_output)
         # Calculate the encoder's output
-        encoder_output, all_attentions = self.encoder(merged_output, output_attentions=output_attentions)
+        encoder_output, all_attentions = self.encoder(embedding_output, output_attentions=output_attentions)
         # Calculate the logits, take the [CLS] token's output as features for classification
         logits = self.classifier(encoder_output[:, 0])
         # Return the logits and the attention probabilities (optional)
