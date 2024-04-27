@@ -244,8 +244,30 @@ class ViTForClassfication(nn.Module):
         self.encoder = Encoder(config)
         # Create a linear layer to project the encoder's output to the number of classes
         self.classifier = FinalLayer(config)
+
         # Initialize the weights
-        self.apply(self._init_weights)
+        for module in self.modules():
+            if isinstance(module, (nn.Linear, nn.Conv2d)):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
+                continue
+            if isinstance(module, nn.LayerNorm):
+                module.bias.data.zero_()
+                module.weight.data.fill_(1.0)
+                continue
+            if isinstance(module, Embeddings):
+                module.position_embeddings.data = nn.init.trunc_normal_(
+                    module.position_embeddings.data.to(torch.float32),
+                    mean=0.0,
+                    std=self.config["initializer_range"],
+                ).to(module.position_embeddings.dtype)
+                module.cls_token.data = nn.init.trunc_normal_(
+                    module.cls_token.data.to(torch.float32),
+                    mean=0.0,
+                    std=self.config["initializer_range"],
+                ).to(module.cls_token.dtype)
+                continue
 
     def forward(self, x, output_attentions=False):
         # Calculate the embedding output
@@ -259,25 +281,4 @@ class ViTForClassfication(nn.Module):
             return (logits, None)
         else:
             return (logits, all_attentions)
-    
-    def _init_weights(self, module):
-        if isinstance(module, (nn.Linear, nn.Conv2d)):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-        elif isinstance(module, Embeddings):
-            module.position_embeddings.data = nn.init.trunc_normal_(
-                module.position_embeddings.data.to(torch.float32),
-                mean=0.0,
-                std=self.config["initializer_range"],
-            ).to(module.position_embeddings.dtype)
 
-            module.cls_token.data = nn.init.trunc_normal_(
-                module.cls_token.data.to(torch.float32),
-                mean=0.0,
-                std=self.config["initializer_range"],
-            ).to(module.cls_token.dtype)
-        
