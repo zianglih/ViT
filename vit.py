@@ -221,7 +221,21 @@ class Encoder(nn.Module):
             return (x, None)
         else:
             return (x, all_attentions)
-        
+
+
+# patch merger class
+class PatchMerger(nn.Module):
+    def __init__(self, dim, num_tokens_out):
+        super().__init__()
+        self.scale = dim ** -0.5
+        self.norm = nn.LayerNorm(dim)
+        self.queries = nn.Parameter(torch.randn(num_tokens_out, dim))
+
+    def forward(self, x):
+        x = self.norm(x)
+        sim = torch.matmul(self.queries, x.transpose(-1, -2)) * self.scale
+        attn = sim.softmax(dim = -1)
+        return torch.matmul(attn, x)
 
 class ViTForClassfication(nn.Module):
     """
@@ -236,6 +250,8 @@ class ViTForClassfication(nn.Module):
         self.num_classes = config["num_classes"]
         # Create the embedding module
         self.embedding = Embeddings(config)
+        # Initialize PatchMerger
+        self.patch_merger = PatchMerger(dim=self.hidden_size, num_tokens_out=2)
         # Create the transformer encoder module
         self.encoder = Encoder(config)
         # Create a linear layer to project the encoder's output to the number of classes
@@ -246,8 +262,10 @@ class ViTForClassfication(nn.Module):
     def forward(self, x, output_attentions=False):
         # Calculate the embedding output
         embedding_output = self.embedding(x)
+        # Merge patches if applicable
+        merged_output = self.patch_merger(embedding_output)
         # Calculate the encoder's output
-        encoder_output, all_attentions = self.encoder(embedding_output, output_attentions=output_attentions)
+        encoder_output, all_attentions = self.encoder(merged_output, output_attentions=output_attentions)
         # Calculate the logits, take the [CLS] token's output as features for classification
         logits = self.classifier(encoder_output[:, 0])
         # Return the logits and the attention probabilities (optional)
