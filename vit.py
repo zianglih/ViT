@@ -6,13 +6,11 @@ class PatchEmbeddings(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.image_size = config["image_size"]
-        self.patch_size = config["patch_size"]
-        self.num_channels = config["num_channels"]
-        self.hidden_size = config["hidden_size"]
-        self.num_patches = (self.image_size // self.patch_size) ** 2
-        
-        self.projection = nn.Conv2d(self.num_channels, self.hidden_size, kernel_size=self.patch_size, stride=self.patch_size)
+
+        self.projection = nn.Conv2d(in_channels=config["num_channels"],
+                                    out_channels=config["hidden_size"],
+                                    kernel_size=config["patch_size"],
+                                    stride=config["patch_size"])
 
     def forward(self, x):
         x = self.projection(x)
@@ -24,16 +22,15 @@ class Embeddings(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.config = config
+        self.num_patches = (config["image_size"] // config["patch_size"]) ** 2
+
         self.patch_embeddings = PatchEmbeddings(config)
-        self.hidden_size = config["hidden_size"]
-        self.cls_token = nn.Parameter(torch.randn(1, 1, self.hidden_size))
-        self.position_embeddings = nn.Parameter(torch.randn(1, self.patch_embeddings.num_patches + 1, self.hidden_size))
+        self.cls_token = nn.Parameter(torch.randn(1, 1, config["hidden_size"]))
+        self.position_embeddings = nn.Parameter(torch.randn(1, self.num_patches + 1, config["hidden_size"]))
 
     def forward(self, x):
         x = self.patch_embeddings(x)
-        batch_size = x.shape[0]
-        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
+        cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
         x = x + self.position_embeddings
         return x
@@ -66,9 +63,10 @@ class MultiHeadAttention(nn.Module):
         super().__init__()
         self.hidden_size = config["hidden_size"]
         self.num_attention_heads = config["num_attention_heads"]
+        self.qkv_bias = config["qkv_bias"]
+
         self.attention_head_size = self.hidden_size // self.num_attention_heads
         self.all_head_size = self.num_attention_heads * self.attention_head_size
-        self.qkv_bias = config["qkv_bias"]
         self.heads = nn.ModuleList([])
         for _ in range(self.num_attention_heads):
             head = AttentionHead(
@@ -93,6 +91,7 @@ class MLP(nn.Module):
         super().__init__()
         self.hidden_size = config["hidden_size"]
         self.intermediate_size = config["intermediate_size"]
+        
         self.layers = nn.ModuleList([
             nn.Linear(self.hidden_size, self.intermediate_size),
             nn.GELU(),
@@ -127,14 +126,15 @@ class Encoder(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        self.num_hidden_layers = config["num_hidden_layers"]
+        self.use_patch_merger = config["use_patch_merger"]
+        self.patch_merger_index = self.num_hidden_layers // 2
+
         self.blocks = nn.ModuleList([])
         for _ in range(config["num_hidden_layers"]):
             block = Block(config)
             self.blocks.append(block)
             
-        self.num_hidden_layers = config["num_hidden_layers"]
-        self.use_patch_merger = config["use_patch_merger"]
-        self.patch_merger_index = self.num_hidden_layers // 2
         self.patch_merger = PatchMerger(dim=config["hidden_size"], num_tokens_out=8)
 
     def forward(self, x):
@@ -154,6 +154,7 @@ class FinalLayer(nn.Module):
         self.last_layer_use_mlp = config["last_layer_use_mlp"]
         self.hidden_size = config["hidden_size"]
         self.num_classes = config["num_classes"]
+
         if (self.last_layer_use_mlp):
             self.classifier = MLP(config)
         else:
@@ -181,17 +182,17 @@ class ViTForClassfication(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.config = config
         self.image_size = config["image_size"]
         self.hidden_size = config["hidden_size"]
         self.num_classes = config["num_classes"]
+
         self.embedding = Embeddings(config)
         self.encoder = Encoder(config)
         self.classifier = FinalLayer(config)
 
         for module in self.modules():
             if isinstance(module, (nn.Linear, nn.Conv2d)):
-                torch.nn.init.normal_(module.weight, mean=0.0, std=self.config["initializer_range"])
+                torch.nn.init.normal_(module.weight, mean=0.0, std=config["initializer_range"])
                 if module.bias is not None:
                     torch.nn.init.zeros_(module.bias)
                 continue
@@ -203,12 +204,12 @@ class ViTForClassfication(nn.Module):
                 module.position_embeddings.data = nn.init.trunc_normal_(
                     module.position_embeddings.data.to(torch.float32),
                     mean=0.0,
-                    std=self.config["initializer_range"],
+                    std=config["initializer_range"],
                 ).to(module.position_embeddings.dtype)
                 module.cls_token.data = nn.init.trunc_normal_(
                     module.cls_token.data.to(torch.float32),
                     mean=0.0,
-                    std=self.config["initializer_range"],
+                    std=config["initializer_range"],
                 ).to(module.cls_token.dtype)
                 continue
 
