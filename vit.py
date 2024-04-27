@@ -40,7 +40,43 @@ class PatchEmbeddings(nn.Module):
         x = self.projection(x)
         x = x.flatten(2).transpose(1, 2)
         return x
+ 
+class ShiftedPatchEmbeddings(nn.Module):
+    """
+    This module applies shifts to the input image to augment its context,
+    tokenizes the augmented image into patches, normalizes, and projects
+    these patches into a specified dimension.
+    """
+    def __init__(self,config):
+        super().__init__()
+        # Each patch has `patch_size * patch_size * channels` features
+        # Multiply by 5 assuming input + 4 shifted versions
+        self.hidden_size = config["hidden_size"]
+        self.patch_size = config["patch_size"]
+        self.num_channels = config["num_channels"]
+        self.patch_dim = self.patch_size * self.patch_size * self.num_channels * 5
 
+        self.to_patch_tokens = nn.Sequential(
+            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=self.patch_size, p2=self.patch_size),
+            nn.LayerNorm(self.patch_dim),
+            nn.Linear(self.patch_dim, self.hidden_size)
+        )
+
+    def forward(self, x):
+        """
+        Args:
+            x: Tensor, shape [batch_size, channels, height, width]
+        
+        Returns:
+            Patch tokens: Tensor, shape [batch_size, num_patches, dim]
+        """
+        # Define shifts for padding: simulate shifting by padding opposite sides
+        shifts = [(1, -1, 0, 0), (-1, 1, 0, 0), (0, 0, 1, -1), (0, 0, -1, 1)]
+        shifted_x = [F.pad(x, shift, mode='circular') for shift in shifts]
+        # Concatenate original and shifted images along channel dimension
+        x_with_shifts = torch.cat([x] + shifted_x, dim=1)
+        return self.to_patch_tokens(x_with_shifts)
+    
 class Embeddings(nn.Module):
     """
     Add positional embeddings to the patch embeddings.
@@ -104,93 +140,27 @@ class AttentionHead(nn.Module):
         attention_output = torch.matmul(attention_probs, value)
         return (attention_output, attention_probs)
     
-# class LocalSelfAttention(nn.Module):
-#     def __init__(self, dim, heads=8, dim_head=64, dropout=0.0):
-#         super().__init__()
-#         # Calculate the total dimension of all heads combined
-#         inner_dim = dim_head * heads
-#         self.heads = heads
-        
-#         # Parameter for scaling the dot product in the attention mechanism
-#         self.scale = nn.Parameter(torch.log(torch.tensor(dim_head ** -0.5)))
-        
-#         # Normalization and dropout layers
-#         self.norm = nn.LayerNorm(dim)
-#         self.dropout = nn.Dropout(dropout)
-        
-#         # Linear layers for projecting input to queries, keys, and values
-#         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
-        
-#         # Output projection layer
-#         self.to_out = nn.Sequential(
-#             nn.Linear(inner_dim, dim),
-#             nn.Dropout(dropout)
-#         )
 
-#     def forward(self, x):
-#         # Apply layer norm to the input
-#         x = self.norm(x)
-        
-#         # Generate queries, keys, and values
-#         qkv = self.to_qkv(x).chunk(3, dim=-1)
-#         print(qkv[0].shape)
-#         q, k, v = [self._split_heads(t) for t in qkv]
-#         print(f"Shape of q: {q.shape}")
-#         print(f"Shape of k: {k.shape}")
-#         print(f"Shape of v: {v.shape}")
-#         # Compute the dot products for the queries and keys, scale by the temperature
-#         dots = torch.matmul(q, k.transpose(-2, -1)) * self.scale.exp()
-        
-#         # Apply masking to the diagonal of the attention matrix
-#         mask = torch.eye(dots.shape[-1], device=dots.device).bool()
-#         dots = dots.masked_fill(mask, float('-inf'))
-        
-#         # Apply softmax to get the attention weights, then apply dropout
-#         attn = F.softmax(dots, dim=-1)
-#         attn = self.dropout(attn)
-        
-#         # Multiply attention weights with the values and combine the heads
-#         out = torch.matmul(attn, v)
-#         out = self._combine_heads(out)
-        
-#         print(f"Shape of out: {out.shape}")
-#         # Apply the final linear transformation
-#         return self.to_out(out)
-
-#     # def _split_heads(self, x):
-#     #     """Split the last dimension into (heads, depth)"""
-#     #     return x.reshape(x.shape[0], x.shape[1], self.heads, -1).transpose(1, 2)
-#     def _split_heads(self, x):
-#         """Split the last dimension into (heads, depth)"""
-#         batch_size, seq_length, total_dim = x.shape
-#         head_dim = total_dim // self.heads
-#         x = x.view(batch_size, seq_length, self.heads, head_dim)
-#         return x.permute(0, 2, 1, 3)
-#     def _combine_heads(self, x):
-#         """Combine the heads to get the final dimension as inner_dim"""
-#         x = x.transpose(1, 2).reshape(x.shape[0], x.shape[1], -1)
-#         return x
-class LSA(nn.Module):
+class LocalSelfAttension(nn.Module):
     def __init__(self, config):
         super().__init__()
-        dim = config["hidden_size"]
-        heads = config["num_attention_heads"]
-        dim_head = dim // heads
-        dropout = config["attention_probs_dropout_prob"]
+        self.dim = config["hidden_size"]
+        self.heads = config["num_attention_heads"]
+        self.dim_head = self.dim // self.heads
+        self.dropout = config["attention_probs_dropout_prob"]
 
-        inner_dim = dim_head *  heads
-        self.heads = heads
-        self.temperature = nn.Parameter(torch.log(torch.tensor(dim_head ** -0.5)))
+        inner_dim = self.dim_head *  self.heads
+        self.temperature = nn.Parameter(torch.log(torch.tensor(self.dim_head ** -0.5)))
 
-        self.norm = nn.LayerNorm(dim)
+        self.norm = nn.LayerNorm(self.dim)
         self.attend = nn.Softmax(dim = -1)
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(self.dropout)
 
-        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+        self.to_qkv = nn.Linear(self.dim, inner_dim * 3, bias = False)
 
         self.to_out = nn.Sequential(
-            nn.Linear(inner_dim, dim),
-            nn.Dropout(dropout)
+            nn.Linear(inner_dim, self.dim),
+            nn.Dropout(self.dropout)
         )
 
     def forward(self, x):
@@ -209,7 +179,8 @@ class LSA(nn.Module):
 
         out = torch.matmul(attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
-        return self.to_out(out)    
+        return self.to_out(out)
+        
 class MultiHeadAttention(nn.Module):
     """
     Multi-head attention module.
@@ -234,7 +205,6 @@ class MultiHeadAttention(nn.Module):
                 config["attention_probs_dropout_prob"],
                 self.qkv_bias
             )
-            # lsa = LSA(self.hidden_size, heads=self.num_attention_heads, dim_head=self.attention_head_size, dropout=config["attention_probs_dropout_prob"])
             self.heads.append(head)  
         # Create a linear layer to project the attention output back to the hidden size
         # In most cases, all_head_size and hidden_size are the same
@@ -255,40 +225,7 @@ class MultiHeadAttention(nn.Module):
         else:
             attention_probs = torch.stack([attention_probs for _, attention_probs in attention_outputs], dim=1)
             return (attention_output, attention_probs)
-    
-class SPT(nn.Module):
-    """
-    This module applies shifts to the input image to augment its context,
-    tokenizes the augmented image into patches, normalizes, and projects
-    these patches into a specified dimension.
-    """
-    def __init__(self, dim, patch_size, channels=3):
-        super().__init__()
-        # Each patch has `patch_size * patch_size * channels` features
-        # Multiply by 5 assuming input + 4 shifted versions
-        patch_dim = patch_size * patch_size * channels * 5
-
-        self.to_patch_tokens = nn.Sequential(
-            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=patch_size, p2=patch_size),
-            nn.LayerNorm(patch_dim),
-            nn.Linear(patch_dim, dim)
-        )
-
-    def forward(self, x):
-        """
-        Args:
-            x: Tensor, shape [batch_size, channels, height, width]
-        
-        Returns:
-            Patch tokens: Tensor, shape [batch_size, num_patches, dim]
-        """
-        # Define shifts for padding: simulate shifting by padding opposite sides
-        shifts = [(1, -1, 0, 0), (-1, 1, 0, 0), (0, 0, 1, -1), (0, 0, -1, 1)]
-        shifted_x = [F.pad(x, shift, mode='circular') for shift in shifts]
-        # Concatenate original and shifted images along channel dimension
-        x_with_shifts = torch.cat([x] + shifted_x, dim=1)
-        return self.to_patch_tokens(x_with_shifts)
-
+   
     
 class MLP(nn.Module):
     """
@@ -351,7 +288,7 @@ class Encoder(nn.Module):
         self.blocks = nn.ModuleList([])
         for _ in range(config["num_hidden_layers"]):
             block = Block(config)
-            lsa = LSA(config)
+            lsa = LocalSelfAttension(config)
             self.blocks.append(nn.ModuleList([block, lsa]))
 
     def forward(self, x, output_attentions=False):
@@ -389,7 +326,7 @@ class ViTForClassfication(nn.Module):
         self.hidden_size = config["hidden_size"]
         self.num_classes = config["num_classes"]
         # Create the embedding module
-        self.embedding = SPT(dim = self.hidden_size, patch_size = config["patch_size"], channels = config["num_channels"])
+        self.embedding = ShiftedPatchEmbeddings(config)
         # Create the transformer encoder module
         self.encoder = Encoder(config)
         # Create a linear layer to project the encoder's output to the number of classes
