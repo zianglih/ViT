@@ -12,7 +12,8 @@
         "num_classes": 10, 
         "num_channels": 3,
         "qkv_bias": 1,
-        "last_layer_use_mlp": 0
+        "last_layer_use_mlp": 0,
+        "use_patch_merger": 1
     },
     "args" : {
         "exp_name": "vit_cifar10",

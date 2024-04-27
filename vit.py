@@ -191,6 +191,7 @@ class Encoder(nn.Module):
             
         # Initialize the Patch Merger at middle layer
         self.num_hidden_layers = config["num_hidden_layers"]
+        self.use_patch_merger = config["use_patch_merger"]
         self.patch_merger_index = self.num_hidden_layers // 2
         self.patch_merger = PatchMerger(dim=config["hidden_size"], num_tokens_out=8)
 
@@ -203,7 +204,7 @@ class Encoder(nn.Module):
                 all_attentions.append(attention_probs)
                 
             # Apply patch merger:
-            if i == self.patch_merger_index-1:
+            if self.use_patch_merger and i == self.patch_merger_index-1:
                 x = self.patch_merger(x)
 
         # Return the encoder's output and the attention probabilities (optional)
@@ -256,8 +257,6 @@ class ViTForClassfication(nn.Module):
         self.num_classes = config["num_classes"]
         # Create the embedding module
         self.embedding = Embeddings(config)
-        # Initialize PatchMerger
-        self.patch_merger = PatchMerger(dim=self.hidden_size, num_tokens_out=8)
         # Create the transformer encoder module
         self.encoder = Encoder(config)
         # Create a linear layer to project the encoder's output to the number of classes
