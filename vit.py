@@ -42,8 +42,6 @@ class Embeddings(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, self.hidden_size))
         # Create position embeddings
         self.position_embeddings = nn.Parameter(torch.randn(1, self.patch_embeddings.num_patches + 1, self.hidden_size))
-        # Create regularization dropout layer
-        self.dropout = nn.Dropout(config["hidden_dropout_prob"])
 
     def forward(self, x):
         # Convet image x to patches in hidden dimensions
@@ -55,8 +53,6 @@ class Embeddings(nn.Module):
         x = torch.cat((cls_tokens, x), dim=1)
         # Add position embeddings
         x = x + self.position_embeddings
-        # Apply dropout
-        x = self.dropout(x)
         # Now we have the input ready for the transformer
         return x
 
@@ -65,14 +61,13 @@ class AttentionHead(nn.Module):
     """
     A single attention head.
     """
-    def __init__(self, hidden_size, attention_head_size, dropout, bias=True):
+    def __init__(self, hidden_size, attention_head_size, bias=True):
         super().__init__()
         self.hidden_size = hidden_size
         self.attention_head_size = attention_head_size
         self.query = nn.Linear(hidden_size, attention_head_size, bias=bias)
         self.key = nn.Linear(hidden_size, attention_head_size, bias=bias)
         self.value = nn.Linear(hidden_size, attention_head_size, bias=bias)
-        self.dropout = nn.Dropout(dropout)
     
     def forward(self, x):
         # Get the query, key, and value projections for all tokens
@@ -83,7 +78,6 @@ class AttentionHead(nn.Module):
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
-        attention_probs = self.dropout(attention_probs)
         # Calculate attention output
         attention_output = torch.matmul(attention_probs, value)
         return (attention_output, attention_probs)
@@ -110,14 +104,12 @@ class MultiHeadAttention(nn.Module):
             head = AttentionHead(
                 self.hidden_size,
                 self.attention_head_size,
-                config["attention_probs_dropout_prob"],
                 self.qkv_bias
             )
             self.heads.append(head)
         # Create a linear layer to project the attention output back to the hidden size
         # In most cases, all_head_size and hidden_size are the same
         self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
-        self.output_dropout = nn.Dropout(config["hidden_dropout_prob"])
 
     def forward(self, x, output_attentions=False):
         # Calculate the attention output for each attention head
@@ -126,7 +118,6 @@ class MultiHeadAttention(nn.Module):
         attention_output = torch.cat([attention_output for attention_output, _ in attention_outputs], dim=-1)
         # Project the concatenated attention output back to the hidden size
         attention_output = self.output_projection(attention_output)
-        attention_output = self.output_dropout(attention_output)
         # Return the attention output and the attention probabilities (optional)
         if not output_attentions:
             return (attention_output, None)
@@ -144,12 +135,10 @@ class MLP(nn.Module):
         super().__init__()
         self.hidden_size = config["hidden_size"]
         self.intermediate_size = config["intermediate_size"]
-        self.hidden_dropout_prob = config["hidden_dropout_prob"]
         self.layers = nn.ModuleList([
             nn.Linear(self.hidden_size, self.intermediate_size),
             nn.GELU(),
             nn.Linear(self.intermediate_size, self.hidden_size),
-            nn.Dropout(self.hidden_dropout_prob)
         ])
 
     def forward(self, x):
