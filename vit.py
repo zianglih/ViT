@@ -144,23 +144,24 @@ class AttentionHead(nn.Module):
 class LocalSelfAttension(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.dim = config["hidden_size"]
-        self.heads = config["num_attention_heads"]
-        self.dim_head = self.dim // self.heads
-        self.dropout = config["attention_probs_dropout_prob"]
+        dim = config["hidden_size"]
+        heads = config["num_attention_heads"]
+        dim_head = dim // heads
+        dropout = config["attention_probs_dropout_prob"]
 
-        inner_dim = self.dim_head *  self.heads
-        self.temperature = nn.Parameter(torch.log(torch.tensor(self.dim_head ** -0.5)))
+        inner_dim = dim_head *  heads
+        self.heads = heads
+        self.temperature = nn.Parameter(torch.log(torch.tensor(dim_head ** -0.5)))
 
-        self.norm = nn.LayerNorm(self.dim)
+        self.norm = nn.LayerNorm(dim)
         self.attend = nn.Softmax(dim = -1)
-        self.dropout = nn.Dropout(self.dropout)
+        self.dropout = nn.Dropout(dropout)
 
-        self.to_qkv = nn.Linear(self.dim, inner_dim * 3, bias = False)
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
 
         self.to_out = nn.Sequential(
-            nn.Linear(inner_dim, self.dim),
-            nn.Dropout(self.dropout)
+            nn.Linear(inner_dim, dim),
+            nn.Dropout(dropout)
         )
 
     def forward(self, x):
@@ -205,6 +206,7 @@ class MultiHeadAttention(nn.Module):
                 config["attention_probs_dropout_prob"],
                 self.qkv_bias
             )
+            # lsa = LSA(self.hidden_size, heads=self.num_attention_heads, dim_head=self.attention_head_size, dropout=config["attention_probs_dropout_prob"])
             self.heads.append(head)  
         # Create a linear layer to project the attention output back to the hidden size
         # In most cases, all_head_size and hidden_size are the same
@@ -286,10 +288,14 @@ class Encoder(nn.Module):
         super().__init__()
         # Create a list of transformer blocks
         self.blocks = nn.ModuleList([])
+        self.use_local_self_attention = config["use_local_self_attention"]
         for _ in range(config["num_hidden_layers"]):
             block = Block(config)
-            lsa = LocalSelfAttension(config)
-            self.blocks.append(nn.ModuleList([block, lsa]))
+            if self.use_local_self_attention:
+                lsa = LocalSelfAttension(config)
+                self.blocks.append(nn.ModuleList([block, lsa]))
+            else:
+                self.blocks.append(nn.ModuleList(block))
 
     def forward(self, x, output_attentions=False):
         # Calculate the transformer block's output for each block
@@ -298,9 +304,11 @@ class Encoder(nn.Module):
         #     x, attention_probs = block(x, output_attentions=output_attentions)
         #     if output_attentions:
         #         all_attentions.append(attention_probs)
+        
         for block, lsa in self.blocks:
             x, attention_probs = block(x, output_attentions=output_attentions)
-            x = lsa(x) + x
+            if self.use_local_self_attention:
+                x = lsa(x) + x
             if output_attentions:
                 all_attentions.append(attention_probs)
         # Return the encoder's output and the attention probabilities (optional)
@@ -325,8 +333,9 @@ class ViTForClassfication(nn.Module):
         self.image_size = config["image_size"]
         self.hidden_size = config["hidden_size"]
         self.num_classes = config["num_classes"]
+        self.use_shifted_patch_embeddings = config["use_shifted_patch_embeddings"]
         # Create the embedding module
-        self.embedding = ShiftedPatchEmbeddings(config)
+        self.embedding = ShiftedPatchEmbeddings(config) if self.use_shifted_patch_embeddings else Embeddings(config)
         # Create the transformer encoder module
         self.encoder = Encoder(config)
         # Create a linear layer to project the encoder's output to the number of classes
