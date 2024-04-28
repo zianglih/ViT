@@ -11,15 +11,22 @@ class PatchEmbeddings(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        self.projection = nn.Conv2d(in_channels=config["num_channels"],
+        patch_size = config["patch_size"]
+        num_channels = config["num_channels"] 
+
+        self.to_patches = nn.Conv2d(in_channels=num_channels,
                                     out_channels=config["hidden_size"],
-                                    kernel_size=config["patch_size"],
-                                    stride=config["patch_size"])
+                                    kernel_size=patch_size,
+                                    stride=patch_size)
 
     def forward(self, x):
-        x = self.projection(x)
+        # B C H W
+        x = self.to_patches(x)
+        # B hidden_size image_size/patch_size image_size/patch_size
         x = x.flatten(2)
+        # B hidden_size (image_size/patch_size)**2 = num_patches
         x = x.transpose(1, 2)
+        # B num_patches hidden_size
         return x
 
 class ShiftedPatchEmbeddings(nn.Module):
@@ -46,68 +53,80 @@ class Embeddings(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+
+        hidden_size = config["hidden_size"] 
+
         self.num_patches = (config["image_size"] // config["patch_size"]) ** 2
 
         self.patch_embeddings = PatchEmbeddings(config)
-        self.cls_token = nn.Parameter(torch.randn(1, 1, config["hidden_size"]))
-        self.position_embeddings = nn.Parameter(torch.randn(1, self.num_patches + 1, config["hidden_size"]))
+        # cls: 1 1 hidden_size
+        self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_size))
+        self.position_embeddings = nn.Parameter(torch.randn(1, self.num_patches + 1, hidden_size))
+        self.dropout = nn.Dropout(config["dropout_rate"])
 
     def forward(self, x):
         x = self.patch_embeddings(x)
+        # cls: B 1 hidden_size
         cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
         x = x + self.position_embeddings
+        x = self.dropout(x)
         return x
 
 
-class AttentionHead(nn.Module):
+# class AttentionHead(nn.Module):
 
-    def __init__(self, hidden_size, attention_head_size, bias=True):
-        super().__init__()
-        self.hidden_size = hidden_size
-        self.attention_head_size = attention_head_size
-        self.query = nn.Linear(hidden_size, attention_head_size, bias=bias)
-        self.key = nn.Linear(hidden_size, attention_head_size, bias=bias)
-        self.value = nn.Linear(hidden_size, attention_head_size, bias=bias)
+#     def __init__(self, hidden_size, attention_head_size, bias=True):
+#         super().__init__()
+#         self.hidden_size = hidden_size
+#         self.scale = attention_head_size ** -0.5
+#         self.query = nn.Linear(hidden_size, attention_head_size, bias=bias)
+#         self.key = nn.Linear(hidden_size, attention_head_size, bias=bias)
+#         self.value = nn.Linear(hidden_size, attention_head_size, bias=bias)
     
-    def forward(self, x):
-        query = self.query(x)
-        key = self.key(x)
-        value = self.value(x)
-        attention_scores = torch.matmul(query, key.transpose(-1, -2))
-        attention_scores = attention_scores / math.sqrt(self.attention_head_size)
-        attention_probs = nn.functional.softmax(attention_scores, dim=-1)
-        attention_output = torch.matmul(attention_probs, value)
-        return (attention_output, attention_probs)
+#     def forward(self, x):
+#         query, key, value = self.query(x), self.key(x), self.value(x)
+#         attention_scores = torch.matmul(query, key.transpose(-1, -2)) * self.scale
+#         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+#         attention_output = torch.matmul(attention_probs, value)
+#         return attention_output, attention_probs
     
 
 class MultiHeadAttention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.hidden_size = config["hidden_size"]
-        self.num_attention_heads = config["num_attention_heads"]
-        self.qkv_bias = config["qkv_bias"]
+        # self.hidden_size = config["hidden_size"]
+        # self.num_attention_heads = config["num_attention_heads"]
+        # self.qkv_bias = config["qkv_bias"]
 
-        self.attention_head_size = self.hidden_size // self.num_attention_heads
-        self.all_head_size = self.num_attention_heads * self.attention_head_size
-        self.heads = nn.ModuleList([])
-        for _ in range(self.num_attention_heads):
-            head = AttentionHead(
-                self.hidden_size,
-                self.attention_head_size,
-                self.qkv_bias
-            )
-            self.heads.append(head)
-        self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
+        # self.attention_head_size = self.hidden_size // self.num_attention_heads
+        # self.all_head_size = self.num_attention_heads * self.attention_head_size
+        # self.heads = nn.ModuleList([])
+        # for _ in range(self.num_attention_heads):
+        #     head = AttentionHead(
+        #         self.hidden_size,
+        #         self.attention_head_size,
+        #         self.qkv_bias
+        #     )
+        #     self.heads.append(head)
+        # self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
+        self.num_heads = config["num_attention_heads"]
+        self.hidden_size = config["hidden_size"]
+        self.wq = nn.Linear(self.hidden_size, self.hidden_size)
+        self.wk = nn.Linear(self.hidden_size, self.hidden_size)
+        self.wv = nn.Linear(self.hidden_size, self.hidden_size)
+        self.wcombine = nn.Linear(self.hidden_size, self.hidden_size)
+        self.softmax = nn.Softmax(dim = -1)
 
     def forward(self, x):
-        attention_outputs = [head(x) for head in self.heads]
-        attention_output = torch.cat([attention_output for attention_output, _ in attention_outputs], dim=-1)
-        attention_output = self.output_projection(attention_output)
-        attention_probs = torch.stack([attention_probs for _, attention_probs in attention_outputs], dim=1)
-        return (attention_output, attention_probs)
-    
+        # attention_outputs = [head(x) for head in self.heads]
+        # attention_output = torch.cat([attention_output for attention_output, _ in attention_outputs], dim=-1)
+        # attention_output = self.output_projection(attention_output)
+        # attention_probs = torch.stack([attention_probs for _, attention_probs in attention_outputs], dim=1)
+        # return (attention_output, attention_probs)
+        return
+
 
 class MLP(nn.Module):
 
@@ -132,14 +151,20 @@ class Block(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.attention = MultiHeadAttention(config)
+        # self.attention = MultiHeadAttention(config)
+        self.attention = nn.MultiheadAttention(
+            embed_dim=config["hidden_size"],
+            num_heads=config["num_attention_heads"],
+            dropout=config["attention_probs_dropout_prob"],
+            batch_first=True
+        )
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
 
     def forward(self, x):
-        attention_output, attention_probs = \
-            self.attention(self.layernorm_1(x))
+        x = self.layernorm_1(x)
+        attention_output, attention_probs = self.attention(query = x, key = x, value = x)
         x = x + attention_output
         mlp_output = self.mlp(self.layernorm_2(x))
         x = x + mlp_output
