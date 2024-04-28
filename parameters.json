@@ -13,14 +13,16 @@
         "num_channels": 3,
         "qkv_bias": 1,
         "last_layer_use_mlp": 0,
-        "use_patch_merger": 1
+        "use_patch_merger": 1,
+        "use_shifted_patch_embeddings": 1,
+        "use_local_self_attention": 1
     },
     "args" : {
         "exp_name": "vit_cifar10",
         "batch_size": 256,
         "epochs": 100,
         "lr": 1e-2,
-        "device": "cuda",
+        "device": "cpu",
         "save_model_every": 0
     }
   }
