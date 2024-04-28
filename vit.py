@@ -197,7 +197,8 @@ class LocalSelfAttension(nn.Module):
         
         # Calculate the attention scores with masking
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.temperature.exp()
-        dots = dots.masked_fill(mask, float('-inf'))
+        mask_val = float('-inf') if dots.dtype == torch.float32 else -1e9
+        dots = dots.masked_fill(mask, mask_val)
         
         attn = self.attend(dots)
         attn = self.dropout_layer(attn)
