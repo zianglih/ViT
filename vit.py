@@ -125,10 +125,9 @@ class Block(nn.Module):
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
 
     def forward(self, x):
-        x = self.layernorm_1(x)
         # attention_output, attention_probs = self.attention(query = x, key = x, value = x)
         attention_output, attention_probs = \
-            self.attention(x)
+            self.attention(self.layernorm_1(x))
         x = x + attention_output
         mlp_output = self.mlp(self.layernorm_2(x))
         x = x + mlp_output
