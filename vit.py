@@ -49,6 +49,17 @@ class ShiftedPatchEmbeddings(nn.Module):
         x_with_shifts = torch.cat([x] + shifted_x, dim=1)
         return self.to_patch_tokens(x_with_shifts)
 
+def gen_pos_embedding(num_patches, hidden_size):
+    position_enc = torch.zeros(num_patches, hidden_size)
+    position = torch.arange(0, num_patches, dtype=torch.float).unsqueeze(1)
+    div_term = torch.exp(torch.arange(0, hidden_size, 2).float() * (-math.log(10000.0) / hidden_size))
+
+    position_enc[:, 0::2] = torch.sin(position * div_term)
+    position_enc[:, 1::2] = torch.cos(position * div_term)
+
+    position_enc = position_enc.unsqueeze(0)
+    return nn.Parameter(position_enc, requires_grad=False)
+
 class Embeddings(nn.Module):
 
     def __init__(self, config):
