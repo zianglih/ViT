@@ -113,20 +113,22 @@ class Block(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        # self.attention = MultiHeadAttention(config)
-        self.attention = nn.MultiheadAttention(
-            embed_dim=config["hidden_size"],
-            num_heads=config["num_attention_heads"],
-            dropout=config["attention_probs_dropout_prob"],
-            batch_first=True
-        )
+        self.attention = MultiHeadAttention(config)
+        # self.attention = nn.MultiheadAttention(
+        #     embed_dim=config["hidden_size"],
+        #     num_heads=config["num_attention_heads"],
+        #     dropout=config["attention_probs_dropout_prob"],
+        #     batch_first=True
+        # )
         self.layernorm_1 = nn.LayerNorm(config["hidden_size"])
         self.mlp = MLP(config)
         self.layernorm_2 = nn.LayerNorm(config["hidden_size"])
 
     def forward(self, x):
         x = self.layernorm_1(x)
-        attention_output, attention_probs = self.attention(query = x, key = x, value = x)
+        # attention_output, attention_probs = self.attention(query = x, key = x, value = x)
+        attention_output, attention_probs = \
+            self.attention(x)
         x = x + attention_output
         mlp_output = self.mlp(self.layernorm_2(x))
         x = x + mlp_output
@@ -147,6 +149,54 @@ class Block(nn.Module):
 
 #     def forward(self, x):
 #         return self.performer(x)
+
+class AttentionHead(nn.Module):
+
+    def __init__(self, hidden_size, attention_head_size, bias=True):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.attention_head_size = attention_head_size
+        self.query = nn.Linear(hidden_size, attention_head_size, bias=bias)
+        self.key = nn.Linear(hidden_size, attention_head_size, bias=bias)
+        self.value = nn.Linear(hidden_size, attention_head_size, bias=bias)
+    
+    def forward(self, x):
+        query = self.query(x)
+        key = self.key(x)
+        value = self.value(x)
+        attention_scores = torch.matmul(query, key.transpose(-1, -2))
+        attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+        attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+        attention_output = torch.matmul(attention_probs, value)
+        return (attention_output, attention_probs)
+    
+
+class MultiHeadAttention(nn.Module):
+
+    def __init__(self, config):
+        super().__init__()
+        self.hidden_size = config["hidden_size"]
+        self.num_attention_heads = config["num_attention_heads"]
+        self.qkv_bias = config["qkv_bias"]
+
+        self.attention_head_size = self.hidden_size // self.num_attention_heads
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
+        self.heads = nn.ModuleList([])
+        for _ in range(self.num_attention_heads):
+            head = AttentionHead(
+                self.hidden_size,
+                self.attention_head_size,
+                self.qkv_bias
+            )
+            self.heads.append(head)
+        self.output_projection = nn.Linear(self.all_head_size, self.hidden_size)
+
+    def forward(self, x):
+        attention_outputs = [head(x) for head in self.heads]
+        attention_output = torch.cat([attention_output for attention_output, _ in attention_outputs], dim=-1)
+        attention_output = self.output_projection(attention_output)
+        attention_probs = torch.stack([attention_probs for _, attention_probs in attention_outputs], dim=1)
+        return (attention_output, attention_probs)
 
 class LocalSelfAttension(nn.Module):
     def __init__(self, config):
