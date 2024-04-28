@@ -15,7 +15,8 @@
         "last_layer_use_mlp": 0,
         "use_patch_merger": 1,
         "use_shifted_patch_embeddings": 1,
-        "use_local_self_attention": 1
+        "use_local_self_attention": 1,
+        "use_performer": 0
     },
     "args" : {
         "exp_name": "vit_cifar10",

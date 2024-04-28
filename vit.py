@@ -23,15 +23,8 @@ class PatchEmbeddings(nn.Module):
         return x
 
 class ShiftedPatchEmbeddings(nn.Module):
-    """
-    This module applies shifts to the input image to augment its context,
-    tokenizes the augmented image into patches, normalizes, and projects
-    these patches into a specified dimension.
-    """
     def __init__(self,config):
         super().__init__()
-        # Each patch has `patch_size * patch_size * channels` features
-        # Multiply by 5 assuming input + 4 shifted versions
         self.hidden_size = config["hidden_size"]
         self.patch_size = config["patch_size"]
         self.num_channels = config["num_channels"]
@@ -44,17 +37,8 @@ class ShiftedPatchEmbeddings(nn.Module):
         )
 
     def forward(self, x):
-        """
-        Args:
-            x: Tensor, shape [batch_size, channels, height, width]
-        
-        Returns:
-            Patch tokens: Tensor, shape [batch_size, num_patches, dim]
-        """
-        # Define shifts for padding: simulate shifting by padding opposite sides
         shifts = [(1, -1, 0, 0), (-1, 1, 0, 0), (0, 0, 1, -1), (0, 0, -1, 1)]
         shifted_x = [F.pad(x, shift, mode='circular') for shift in shifts]
-        # Concatenate original and shifted images along channel dimension
         x_with_shifts = torch.cat([x] + shifted_x, dim=1)
         return self.to_patch_tokens(x_with_shifts)
 
@@ -184,6 +168,7 @@ class LocalSelfAttension(nn.Module):
         heads = config["num_attention_heads"]
         dim_head = dim // heads
         dropout = config["attention_probs_dropout_prob"]
+        self.use_performer = config["use_performer"]
 
         inner_dim = dim_head *  heads
         self.efficent_self_attention = EfficientSelfAttention(config)
@@ -203,7 +188,8 @@ class LocalSelfAttension(nn.Module):
 
     def forward(self, x):
         x = self.norm(x)
-        x = self.efficent_self_attention(x)
+        if self.use_performer:
+            x = self.efficent_self_attention(x)
         q, k, v = self.prepare_qkv(x)
 
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.temperature.exp()
