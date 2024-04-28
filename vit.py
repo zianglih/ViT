@@ -76,7 +76,7 @@ class Embeddings(nn.Module):
             self.position_embeddings = nn.Parameter(torch.randn(1, self.num_patches + 1, hidden_size))
         elif (config["use_simpleViT"] == 1):
             self.position_embeddings = gen_pos_embedding(self.num_patches, hidden_size)
-        self.dropout = nn.Dropout(config["dropout_rate"])
+        # self.dropout = nn.Dropout(config["dropout_rate"])
 
     def forward(self, x):
         x = self.patch_embeddings(x)
@@ -87,7 +87,7 @@ class Embeddings(nn.Module):
             x = x + self.position_embeddings
         elif (self.config["use_simpleViT"] == 1):
             x[:, 1:] += self.position_embeddings
-        x = self.dropout(x)
+        # x = self.dropout(x)
         return x
 
 
