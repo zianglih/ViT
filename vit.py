@@ -1,6 +1,10 @@
 import torch.nn as nn
 import torch
 import math
+import torch.nn.functional as F
+from einops import rearrange, repeat
+from einops.layers.torch import Rearrange
+
 
 class PatchEmbeddings(nn.Module):
 
@@ -17,6 +21,26 @@ class PatchEmbeddings(nn.Module):
         x = x.flatten(2)
         x = x.transpose(1, 2)
         return x
+
+class ShiftedPatchEmbeddings(nn.Module):
+    def __init__(self,config):
+        super().__init__()
+        self.hidden_size = config["hidden_size"]
+        self.patch_size = config["patch_size"]
+        self.num_channels = config["num_channels"]
+        self.patch_dim = self.patch_size * self.patch_size * self.num_channels * 5
+
+        self.to_patch_tokens = nn.Sequential(
+            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=self.patch_size, p2=self.patch_size),
+            nn.LayerNorm(self.patch_dim),
+            nn.Linear(self.patch_dim, self.hidden_size)
+        )
+
+    def forward(self, x):
+        shifts = [(1, -1, 0, 0), (-1, 1, 0, 0), (0, 0, 1, -1), (0, 0, -1, 1)]
+        shifted_x = [F.pad(x, shift, mode='circular') for shift in shifts]
+        x_with_shifts = torch.cat([x] + shifted_x, dim=1)
+        return self.to_patch_tokens(x_with_shifts)
 
 class Embeddings(nn.Module):
 
@@ -120,7 +144,70 @@ class Block(nn.Module):
         mlp_output = self.mlp(self.layernorm_2(x))
         x = x + mlp_output
         return (x, attention_probs)
-        
+  
+from performer_pytorch import Performer
+
+class EfficientSelfAttention(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.performer = Performer(
+            dim=config["hidden_size"],
+            depth=1,
+            heads=config["num_attention_heads"],
+            causal=True,
+            dim_head=config["hidden_size"] // config["num_attention_heads"],
+        )
+
+    def forward(self, x):
+        return self.performer(x)
+
+class LocalSelfAttension(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        dim = config["hidden_size"]
+        heads = config["num_attention_heads"]
+        dim_head = dim // heads
+        dropout = config["attention_probs_dropout_prob"]
+        self.use_performer = config["use_performer"]
+
+        inner_dim = dim_head *  heads
+        self.efficent_self_attention = EfficientSelfAttention(config)
+        self.heads = heads
+        self.temperature = nn.Parameter(torch.log(torch.tensor(dim_head ** -0.5)))
+
+        self.norm = nn.LayerNorm(dim)
+        self.attend = nn.Softmax(dim = -1)
+        self.dropout = nn.Dropout(dropout)
+
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, dim),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x):
+        x = self.norm(x)
+        if self.use_performer:
+            x = self.efficent_self_attention(x)
+        q, k, v = self.prepare_qkv(x)
+
+        dots = torch.matmul(q, k.transpose(-1, -2)) * self.temperature.exp()
+
+        mask = torch.eye(dots.shape[-1], device = dots.device, dtype = torch.bool)
+        mask_value = float('-inf')
+        dots = dots.masked_fill(mask, mask_value)
+
+        attn = self.attend(dots)
+        attn = self.dropout(attn)
+
+        out = torch.matmul(attn, v)
+        out = rearrange(out, 'b h n d -> b n (h d)')
+        return self.to_out(out)
+    
+    def prepare_qkv(self, x):
+        qkv = self.to_qkv(x)
+        return rearrange(qkv, 'b n (h d three) -> three b h n d', h=self.heads, three=3)
 
 class Encoder(nn.Module):
 
@@ -129,16 +216,26 @@ class Encoder(nn.Module):
         self.num_hidden_layers = config["num_hidden_layers"]
         self.use_patch_merger = config["use_patch_merger"]
         self.patch_merger_index = self.num_hidden_layers // 2
-
+        self.use_local_self_attention = config["use_local_self_attention"]
         self.blocks = nn.ModuleList([])
         for _ in range(config["num_hidden_layers"]):
             block = Block(config)
-            self.blocks.append(block)
-            
+            if self.use_local_self_attention:
+                lsa = LocalSelfAttension(config)
+                self.blocks.append(nn.ModuleList([block, lsa]))
+            else:
+                self.blocks.append(block)
         self.patch_merger = PatchMerger(dim=config["hidden_size"], num_tokens_out=8)
 
     def forward(self, x):
         all_attentions = []
+        if self.use_local_self_attention:
+            for block, lsa in self.blocks:
+                x, attention_probs = block(x)
+                x = lsa(x) + x
+                all_attentions.append(attention_probs)
+            return (x, all_attentions)
+
         for i, block in enumerate(self.blocks):
             x, attention_probs = block(x)
             all_attentions.append(attention_probs)
@@ -185,8 +282,13 @@ class ViTForClassfication(nn.Module):
         self.image_size = config["image_size"]
         self.hidden_size = config["hidden_size"]
         self.num_classes = config["num_classes"]
+        self.use_shifted_patch_embeddings = config["use_shifted_patch_embeddings"]
+        # Create the embedding module
+        if self.use_shifted_patch_embeddings:
+            self.embedding = ShiftedPatchEmbeddings(config)
+        else:
+            self.embedding = Embeddings(config)
 
-        self.embedding = Embeddings(config)
         self.encoder = Encoder(config)
         self.classifier = FinalLayer(config)
 
