@@ -101,7 +101,7 @@ class Trainer:
 
 def main():
     metadata = {}
-    with open('parameters.json') as f:
+    with open('all_tests.json') as f:
         all_tests = json.load(f)
     for metadata in all_tests:
         config = metadata['config']
