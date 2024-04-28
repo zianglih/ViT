@@ -18,21 +18,40 @@ class PatchEmbeddings(nn.Module):
         x = x.transpose(1, 2)
         return x
 
+def gen_pos_embedding(num_patches, hidden_size):
+    position_enc = torch.zeros(num_patches, hidden_size)
+    position = torch.arange(0, num_patches, dtype=torch.float).unsqueeze(1)
+    div_term = torch.exp(torch.arange(0, hidden_size, 2).float() * (-math.log(10000.0) / hidden_size))
+
+    position_enc[:, 0::2] = torch.sin(position * div_term)
+    position_enc[:, 1::2] = torch.cos(position * div_term)
+
+    position_enc = position_enc.unsqueeze(0)
+    return nn.Parameter(position_enc, requires_grad=False)
+
+
 class Embeddings(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        self.config = config
         self.num_patches = (config["image_size"] // config["patch_size"]) ** 2
 
         self.patch_embeddings = PatchEmbeddings(config)
         self.cls_token = nn.Parameter(torch.randn(1, 1, config["hidden_size"]))
-        self.position_embeddings = nn.Parameter(torch.randn(1, self.num_patches + 1, config["hidden_size"]))
+        if (config["use_simpleViT"] == 1):
+            self.position_embeddings = gen_pos_embedding(self.num_patches, config["hidden_size"])
+        else:
+            self.position_embeddings = nn.Parameter(torch.randn(1, self.num_patches + 1, config["hidden_size"]))
 
     def forward(self, x):
         x = self.patch_embeddings(x)
         cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
-        x = x + self.position_embeddings
+        if (self.config["use_simpleViT"] == 1):
+            x[:, 1:] += self.position_embeddings
+        else:
+            x = x + self.position_embeddings
         return x
 
 
