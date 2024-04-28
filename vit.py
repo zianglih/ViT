@@ -233,19 +233,24 @@ class Encoder(nn.Module):
             return (x, all_attentions)
 
 
-# patch merger class
 class PatchMerger(nn.Module):
     def __init__(self, dim, num_tokens_out):
         super().__init__()
-        self.scale = dim ** -0.5
+        self.dim = dim
+        self.scale = nn.Parameter(torch.ones(1) * (dim ** -0.5))  # Learnable scale
         self.norm = nn.LayerNorm(dim)
         self.queries = nn.Parameter(torch.randn(num_tokens_out, dim))
+        self.bias = nn.Parameter(torch.zeros(num_tokens_out, 1))  # Bias for similarity scores
+        self.dropout = nn.Dropout(0.1)  # Dropout for attention
+        self.temp = nn.Parameter(torch.ones(1))  # Learnable temperature for softmax
 
     def forward(self, x):
         x = self.norm(x)
-        sim = torch.matmul(self.queries, x.transpose(-1, -2)) * self.scale
-        attn = sim.softmax(dim = -1)
+        sim = torch.matmul(self.queries, x.transpose(-1, -2)) * self.scale + self.bias
+        attn = (sim / self.temp).softmax(dim=-1)  # Applying softmax with temperature
+        attn = self.dropout(attn)  # Applying dropout to attention scores
         return torch.matmul(attn, x)
+
 
 class ViTForClassfication(nn.Module):
     """
