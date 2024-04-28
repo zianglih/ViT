@@ -132,21 +132,21 @@ class Block(nn.Module):
         x = x + mlp_output
         return (x, attention_probs)
   
-from performer_pytorch import Performer
+# from performer_pytorch import Performer
 
-class EfficientSelfAttention(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.performer = Performer(
-            dim=config["hidden_size"],
-            depth=1,
-            heads=config["num_attention_heads"],
-            causal=True,
-            dim_head=config["hidden_size"] // config["num_attention_heads"],
-        )
+# class EfficientSelfAttention(nn.Module):
+#     def __init__(self, config):
+#         super().__init__()
+#         self.performer = Performer(
+#             dim=config["hidden_size"],
+#             depth=1,
+#             heads=config["num_attention_heads"],
+#             causal=True,
+#             dim_head=config["hidden_size"] // config["num_attention_heads"],
+#         )
 
-    def forward(self, x):
-        return self.performer(x)
+#     def forward(self, x):
+#         return self.performer(x)
 
 class LocalSelfAttension(nn.Module):
     def __init__(self, config):
@@ -158,7 +158,7 @@ class LocalSelfAttension(nn.Module):
         self.use_performer = config["use_performer"]
 
         inner_dim = dim_head *  heads
-        self.efficent_self_attention = EfficientSelfAttention(config)
+        # self.efficent_self_attention = EfficientSelfAttention(config)
         self.heads = heads
         self.temperature = nn.Parameter(torch.log(torch.tensor(dim_head ** -0.5)))
 
@@ -175,8 +175,8 @@ class LocalSelfAttension(nn.Module):
 
     def forward(self, x):
         x = self.norm(x)
-        if self.use_performer:
-            x = self.efficent_self_attention(x)
+        # if self.use_performer:
+        #     x = self.efficent_self_attention(x)
         q, k, v = self.prepare_qkv(x)
 
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.temperature.exp()
