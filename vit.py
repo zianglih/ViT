@@ -55,13 +55,16 @@ class Embeddings(nn.Module):
         super().__init__()
 
         hidden_size = config["hidden_size"] 
-
+        self.config = config
         self.num_patches = (config["image_size"] // config["patch_size"]) ** 2
 
         self.patch_embeddings = PatchEmbeddings(config)
         # cls: 1 1 hidden_size
         self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_size))
-        self.position_embeddings = nn.Parameter(torch.randn(1, self.num_patches + 1, hidden_size))
+        if (config["use_simpleViT"] == 0):
+            self.position_embeddings = nn.Parameter(torch.randn(1, self.num_patches + 1, hidden_size))
+        elif (config["use_simpleViT"] == 1):
+            self.position_embeddings = gen_pos_embedding(self.num_patches, hidden_size)
         self.dropout = nn.Dropout(config["dropout_rate"])
 
     def forward(self, x):
@@ -69,7 +72,10 @@ class Embeddings(nn.Module):
         # cls: B 1 hidden_size
         cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
-        x = x + self.position_embeddings
+        if (self.config["use_simpleViT"] == 0):
+            x = x + self.position_embeddings
+        elif (self.config["use_simpleViT"] == 1):
+            x[:, 1:] += self.position_embeddings
         x = self.dropout(x)
         return x
 
