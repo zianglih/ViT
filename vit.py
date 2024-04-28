@@ -4,6 +4,7 @@ import math
 import torch.nn.functional as F
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
+from performer_pytorch import Performer
 
 
 class PatchEmbeddings(nn.Module):
@@ -145,8 +146,6 @@ class Block(nn.Module):
         x = x + mlp_output
         return (x, attention_probs)
   
-from performer_pytorch import Performer
-
 class EfficientSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -160,54 +159,59 @@ class EfficientSelfAttention(nn.Module):
 
     def forward(self, x):
         return self.performer(x)
-
-class LocalSelfAttension(nn.Module):
-    def __init__(self, config):
+class LocalSelfAttention(nn.Module):
+    def __init__(self, config, window_size=3):
         super().__init__()
-        dim = config["hidden_size"]
-        heads = config["num_attention_heads"]
-        dim_head = dim // heads
-        dropout = config["attention_probs_dropout_prob"]
+        self.dim = config["hidden_size"]
+        self.heads = config["num_attention_heads"]
+        self.dim_head = self.dim // self.heads
+        self.window_size = window_size  # Local window size for attention
+        self.dropout = config["attention_probs_dropout_prob"]
         self.use_performer = config["use_performer"]
 
-        inner_dim = dim_head *  heads
-        self.efficent_self_attention = EfficientSelfAttention(config)
-        self.heads = heads
-        self.temperature = nn.Parameter(torch.log(torch.tensor(dim_head ** -0.5)))
+        self.inner_dim = self.dim_head * self.heads
+        self.efficent_self_attention = EfficientSelfAttention(config) if self.use_performer else None
+        self.temperature = nn.Parameter(torch.log(torch.tensor(self.dim_head ** -0.5)))
 
-        self.norm = nn.LayerNorm(dim)
-        self.attend = nn.Softmax(dim = -1)
-        self.dropout = nn.Dropout(dropout)
+        self.norm = nn.LayerNorm(self.dim)
+        self.attend = nn.Softmax(dim=-1)
+        self.dropout_layer = nn.Dropout(self.dropout)
 
-        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
-
+        self.to_qkv = nn.Linear(self.dim, self.inner_dim * 3, bias=False)
         self.to_out = nn.Sequential(
-            nn.Linear(inner_dim, dim),
-            nn.Dropout(dropout)
+            nn.Linear(self.inner_dim, self.dim),
+            nn.Dropout(self.dropout)
         )
 
     def forward(self, x):
         x = self.norm(x)
-        if self.use_performer:
+        if self.use_performer and self.efficent_self_attention is not None:
             x = self.efficent_self_attention(x)
-        q, k, v = self.prepare_qkv(x)
+        
+        qkv = self.to_qkv(x)
+        q, k, v = rearrange(qkv, 'b n (h d three) -> three b h n d', h=self.heads, three=3)
 
+        # Creating a local attention mask
+        batch, heads, length, _ = q.size()
+        mask = self.generate_local_mask(length, self.window_size, device=q.device)
+        
+        # Calculate the attention scores with masking
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.temperature.exp()
-
-        mask = torch.eye(dots.shape[-1], device = dots.device, dtype = torch.bool)
-        mask_value = float('-inf')
-        dots = dots.masked_fill(mask, mask_value)
-
+        dots = dots.masked_fill(mask, float('-inf'))
+        
         attn = self.attend(dots)
-        attn = self.dropout(attn)
+        attn = self.dropout_layer(attn)
 
         out = torch.matmul(attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
         return self.to_out(out)
-    
-    def prepare_qkv(self, x):
-        qkv = self.to_qkv(x)
-        return rearrange(qkv, 'b n (h d three) -> three b h n d', h=self.heads, three=3)
+
+    def generate_local_mask(self, length, window_size, device):
+        # Create a mask to zero out entries that are out of the local window
+        full_mask = torch.full((length, length), fill_value=float('-inf'), device=device, dtype=torch.float32)
+        window_mask = torch.tril(torch.triu(full_mask, diagonal=-window_size), diagonal=window_size)
+        return window_mask.unsqueeze(0).unsqueeze(0)  # add batch and head dimensions
+
 
 class Encoder(nn.Module):
 

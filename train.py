@@ -34,8 +34,7 @@ class Trainer:
             train_losses.append(train_loss)
             test_losses.append(test_loss)
             accuracies.append(accuracy)
-            print(f"Epoch: {i+1}, Train loss: {train_loss:.4f}, Test loss: {
-                  test_loss:.4f}, Accuracy: {accuracy:.4f}")
+            print(f"Epoch: {i+1}, Train loss: {train_loss:.4f}, Test loss: {test_loss:.4f}, Accuracy: {accuracy:.4f}")
         outdir = os.path.join("./experiments", self.exp_name)
         os.makedirs(outdir, exist_ok=True)
         configfile = os.path.join(outdir, 'config.json')
