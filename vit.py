@@ -159,13 +159,13 @@ class EfficientSelfAttention(nn.Module):
 
     def forward(self, x):
         return self.performer(x)
-class LocalSelfAttention(nn.Module):
+class LocalSelfAttension(nn.Module):
     def __init__(self, config, window_size=3):
         super().__init__()
         self.dim = config["hidden_size"]
         self.heads = config["num_attention_heads"]
         self.dim_head = self.dim // self.heads
-        self.window_size = window_size  # Local window size for attention
+        self.window_size = window_size  # Locdal window size for attention
         self.dropout = config["attention_probs_dropout_prob"]
         self.use_performer = config["use_performer"]
 
