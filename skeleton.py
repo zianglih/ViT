@@ -125,6 +125,28 @@ class ViTForClassfication(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        for module in self.modules():
+            if isinstance(module, (nn.Linear, nn.Conv2d)):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=config["initializer_range"])
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
+                continue
+            if isinstance(module, nn.LayerNorm):
+                module.bias.data.zero_()
+                module.weight.data.fill_(1.0)
+                continue
+            if isinstance(module, Embeddings):
+                module.position_embeddings.data = nn.init.trunc_normal_(
+                    module.position_embeddings.data.to(torch.float32),
+                    mean=0.0,
+                    std=config["initializer_range"],
+                ).to(module.position_embeddings.dtype)
+                module.cls_token.data = nn.init.trunc_normal_(
+                    module.cls_token.data.to(torch.float32),
+                    mean=0.0,
+                    std=config["initializer_range"],
+                ).to(module.cls_token.dtype)
+                continue
         pass
 
     def forward(self, x):
