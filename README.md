@@ -1,7 +1,6 @@
-# ViT
-
-## Report
-https://github.com/zianglih/ViT/blob/main/Report.pdf
-
-## ViT Implementation and Enhancements
-https://github.com/zianglih/ViT/blob/main/vit.py
+![](./media/Report_Page_1.png)
+![](./media/Report_Page_2.png)
+![](./media/Report_Page_3.png)
+![](./media/Report_Page_4.png)
+![](./media/Report_Page_5.png)
+![](./media/Report_Page_6.png)
